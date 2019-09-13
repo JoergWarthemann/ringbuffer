@@ -3,9 +3,9 @@
 #include "RingBuffer.h"
 #include <string>
 
-SCENARIO("Inserting values into the ring buffer", "[inserting values]")
+SCENARIO("Insert values into the ring buffer", "[insert values]")
 {
-    GIVEN("An input buffer with some items.")
+    GIVEN("A source buffer with some items.")
     {
         static const std::size_t sourceSize = 20;
         static const std::size_t destinationSize = 19;
@@ -20,69 +20,62 @@ SCENARIO("Inserting values into the ring buffer", "[inserting values]")
             "eleven", "twelve", "thirteen", "fourteen", "fivteen",
             "sixteen", "seventeen", "eighteen", "nineteen", "twenty"
         };
+        SourceArrayType sourceControl = source;
         DestinationArrayType destination(destinationSize);
 
         REQUIRE(source.size() == sourceSize);
 
-        WHEN("We move elements rvalue by rvalue into the ring buffer")
+        WHEN("Move single elements into the ring buffer destination")
         {
             for (std::size_t i = 0; i < sourceSize; ++i)
             {
                 // After moving an rvalue element to destination the element at index in source is empty. This results from ValueType being movable.
                 destination.insert(std::move(source[i]));
                 
-                THEN("the element in the source array is empty after forwarding the rvalue.")
+                THEN("the element in the source is empty after having been forwarded as rvalue.")
                 {
                     REQUIRE(source[i].empty());
                 }
-                AND_THEN("the ringbuffer element count increases.")
+                AND_THEN("the element count of destination increases.")
                 {
                     REQUIRE(destination.currentSize() == std::min(destination.capacity(), i + 1));
                 }
             }
         }
 
-        WHEN("We move a block of elements into the ring buffer")
+        WHEN("Move an oversized block of elements into the ring buffer destination")
         {
             destination.insert(std::move(source), sourceSize);
 
-            THEN("the ringbuffer has the right element count.")
+            THEN("the destination has the right element count.")
             {
                 REQUIRE(destination.currentSize() == destinationSize);
             }
         }
-    }
-}
 
-
-SCENARIO("2")
-{
-    GIVEN("An input buffer with some items.")
-    {
-        static const std::size_t sourceSize = 20;
-        static const std::size_t destinationSize = 19;
-        using ValueType = typename std::string;
-        using SourceArrayType = typename std::array<ValueType, sourceSize>;
-        using DestinationArrayType = typename Buffer::RingBuffer<ValueType>;
-
-        SourceArrayType source
+        WHEN("Move an oversized block of elements into the ring buffer destination")
         {
-            "one", "two", "three", "four", "five",
-            "six", "seven", "eight", "nine", "ten",
-            "eleven", "twelve", "thirteen", "fourteen", "fivteen",
-            "sixteen", "seventeen", "eighteen", "nineteen", "twenty"
-        };
-        DestinationArrayType destination(destinationSize);
-
-        REQUIRE(source.size() == sourceSize);
-
-        WHEN("We move a block of elements into the ring buffer")
-        {
+            // We expect the ring buffer to efficiently move the last destinationSize elements only.
             destination.insert(std::move(source), sourceSize);
 
-            THEN("the ringbuffer has the right element count.")
+            // Now the destinationSize last elements of source will be in destination...
+            for (std::size_t i = 0; i < destinationSize; ++i)
             {
-                REQUIRE(destination.currentSize() == destinationSize);
+                ValueType element = destination.copy(i);
+
+                THEN("the element having been moved into destination contains correct data.")
+                {
+                    REQUIRE(element == sourceControl[sourceSize - i - 1]);
+                }
+            }
+
+            // ...while the other elements of source remain untouched.
+            for (std::size_t i = 0, iEnd = sourceSize - destinationSize; i < iEnd; ++i)
+            {
+                AND_THEN("the element not having been moved contains data.")
+                {
+                    REQUIRE_FALSE(source[i].empty());
+                }
             }
         }
     }
