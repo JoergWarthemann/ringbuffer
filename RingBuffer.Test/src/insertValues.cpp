@@ -30,7 +30,7 @@ TEST_CASE("Insert values into the ring buffer", "[insert values]")
             // After moving an rvalue element to destination the element at index in source is empty. This results from ValueType being movable.
             destination.insert(std::move(source[i]));
                 
-            DYNAMIC_SECTION("  The " << i << ". element in the source is empty after having been forwarded as rvalue and the element count of destination increases.")
+            DYNAMIC_SECTION("  The " << i << ". source element is empty after having been forwarded as rvalue and the element count of destination increases.")
             {
                 REQUIRE(source[i].empty());
                 REQUIRE(destination.currentSize() == std::min(destination.capacity(), i + 1));
@@ -58,7 +58,7 @@ TEST_CASE("Insert values into the ring buffer", "[insert values]")
         {
             ValueType element = destination.copy(i);
 
-            DYNAMIC_SECTION("  The " << i << ". element having been moved into destination contains correct data.")
+            DYNAMIC_SECTION("  The " << i << ". source element has been moved into destination and contains the expected data.")
             {
                 REQUIRE(element == sourceControl[sourceSize - i - 1]);
             }
@@ -67,9 +67,61 @@ TEST_CASE("Insert values into the ring buffer", "[insert values]")
         // ...while the other elements of source remain untouched.
         for (std::size_t i = 0, iEnd = sourceSize - destinationSize; i < iEnd; ++i)
         {
-            DYNAMIC_SECTION("  The " << i << ". element remaining in source contains data.")
+            DYNAMIC_SECTION("  The " << i << ". source element remains in source.")
             {
                 REQUIRE_FALSE(source[i].empty());
+            }
+        }
+    }
+
+    SECTION("Move different sized blocks of elements into the ring buffer destination")
+    {
+        std::array<ValueType, sourceSize> source1 = source;
+        std::array<ValueType, sourceSize> source2 = source;
+        std::array<ValueType, sourceSize> source3 = source;
+        
+        const std::size_t size1 = 15, size2 = 10, size3 = 5;
+        std::vector<ValueType> controlGroup;
+        // Build up a control group that contains the expected elements in the right order at the destinationSize last positions in the ring buffer.
+        std::copy(source1.begin(), source1.begin() + size1, std::back_inserter(controlGroup));
+        std::copy(source2.begin(), source2.begin() + size2, std::back_inserter(controlGroup));
+        std::copy(source3.begin(), source3.begin() + size3, std::back_inserter(controlGroup));
+        
+        // Move the sources into the ring buffer destination.
+        destination.insert(std::move(source1), size1);
+        destination.insert(std::move(source2), size2);
+        destination.insert(std::move(source3), size3);
+
+        auto controlTheCurrentIndex = [&sourceControl](std::size_t theIndex, std::array<ValueType, sourceSize>& theSourceArray, std::size_t theArraySize)
+        {
+            DYNAMIC_SECTION("  The " << theIndex << ". source element " << ((theIndex < theArraySize) ? "has been moved into destination." : "remains in source and contains the expected data."))
+            {
+                if (theIndex < theArraySize)
+                    REQUIRE(theSourceArray[theIndex].empty());
+                else
+                    REQUIRE(sourceControl[theIndex] == theSourceArray[theIndex]);
+            }
+        };
+
+        // Check whether the right elements have been moved from source or have been left behind in source.
+        for (std::size_t i = 0; i < sourceSize; ++i)
+        {
+            controlTheCurrentIndex(i, source1, size1);
+            controlTheCurrentIndex(i, source2, size2);
+            controlTheCurrentIndex(i, source3, size3);
+        }
+
+        // Check whether the elements in destination match the elements from the local control group.
+        auto currentlyExpected = controlGroup.end();
+        for (std::size_t i = 0; i < destinationSize; ++i)
+        {
+            --currentlyExpected;
+            auto copiedElement = destination.copy(i);
+            auto exp = *currentlyExpected;
+    
+            DYNAMIC_SECTION("  The " << i << ". destination element contains the expected data.")
+            {
+                REQUIRE(*currentlyExpected == copiedElement);
             }
         }
     }
