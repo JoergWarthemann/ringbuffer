@@ -318,7 +318,7 @@ class RingBuffer
 				start + size,
 				std::is_lvalue_reference<SourceType&&>{});
 
-			int numberOfRemaining = numberOfElements - size;
+			int numberOfRemaining = static_cast<int>(numberOfElements - size);
 			std::size_t startOfRemaining = (start + size) % currentSize_;
 
 			if (numberOfRemaining > 0)
