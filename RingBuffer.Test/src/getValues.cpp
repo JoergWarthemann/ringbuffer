@@ -52,7 +52,7 @@ TEST_CASE("Get values from the ring buffer", "[get values]")
             std::array<ValueType, destinationSize> output;
 
             std::size_t currentBlockSize = i * blockSize;
-            destination.copyBlock(&output[0], currentBlockSize);
+            destination.copy(&output[0], currentBlockSize);
 
             for (std::size_t j = 0, jEnd = ((currentBlockSize <= destinationSize) ? currentBlockSize : destinationSize); j < jEnd; ++j)
             {
@@ -86,7 +86,7 @@ TEST_CASE("Get values from the ring buffer", "[get values]")
         destination.insert(source, size2);
 
         std::array<std::string, destinationSize> output;
-        destination.copyBlock(&output[0], destinationSize);
+        destination.copy(&output[0], destinationSize);
 
         for (std::size_t i = 0; i < destinationSize; ++i)
         {

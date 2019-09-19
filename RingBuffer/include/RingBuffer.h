@@ -10,8 +10,8 @@ namespace Buffer
 {
 /** Does not cast into move iterator. Simply return the passed iterator.
 	Iterator ... The type of iterator. std::is_lvalue_reference<Type&&>::value returns true.
-	@param[in] iterator ... The iterator.
-	@param[in] std::true_type ... Is always std::true_type.
+	\param iterator ... The iterator.
+	\param std::true_type ... Is always std::true_type.
 	\return auto ... Iterator.
 */
 template <typename Iterator>
@@ -22,8 +22,8 @@ Iterator make_forward_iterator(Iterator iterator, std::true_type)
 
 /** Casts iterator into a move iterator.
 	Iterator ... The type of iterator. std::is_lvalue_reference<Type&&>::value returns false.
-	@param[in] iterator ... The iterator.
-	@param[in] std::false_type ... Is always std::false_type.
+	\param iterator ... The iterator.
+	\param std::false_type ... Is always std::false_type.
 	\return auto ... The moveable version of iterator.
 */
 template <typename Iterator>
@@ -35,7 +35,7 @@ auto make_forward_iterator(Iterator iterator, std::false_type)
 /** Uses SFINAE to cast an iterator into a move iterator when the forwarded type is moveable.
 	Type ... The type that is to be iterated.
 	Iterator ... The type of iterator. std::is_lvalue_reference<Type&&>{} is true or false type.
-	@param[in] iterator ... The iterator.
+	\param iterator ... The iterator.
 	\return auto ... Iterator or iterator casted to be moveable.
 */
 template <typename Type, typename Iterator>
@@ -48,10 +48,10 @@ auto make_forward_iterator(Iterator iterator)
 /** Iterates through an array and calls a function on the element together with an incremental index.
 	Iterator ... The type of iterator.
 	Function ... The type of function that is to be called on iterated elements.
-	@param[in] first ... A start iterator.
-	@param[in] last ... An end iterator.
-	@param[in] initial ... An initial value that gets incremented inside.
-	@param[in] func ... The function object that is to be called on the element.
+	\param first ... A start iterator.
+	\param last ... An end iterator.
+	\param initial ... An initial value that gets incremented inside.
+	\param func ... The function object that is to be called on the element.
 	\return Function ... The function object.
 */
 template <typename Iterator, typename Function>
@@ -87,7 +87,7 @@ class RingBuffer
 	std::size_t currentSize_;
 
 	/** Initializes the internal buffer and positions.
-		@param[in] newCapacity ... The new capacity of the internal buffer.
+		\param newCapacity ... The new capacity of the internal buffer.
 	*/
 	void initialize(std::size_t newCapacity)
 	{
@@ -119,8 +119,8 @@ class RingBuffer
 	}
 
 	/** Destructs a range of elements.
-		@param[in] from ... The index of the first element.
-		@param[in] to ... The indexof the last element.
+		\param from ... The index of the first element.
+		\param to ... The indexof the last element.
 	*/
 	void destruct(const std::size_t from, const std::size_t to)
 	{
@@ -134,21 +134,12 @@ class RingBuffer
 		});
 	}
 
-	/** Recalculates writePosition_ and currentSize_ after moving a specified number of elements.
-		@param[in] movedSamples ... The number of samples that have been moved.
-	*/
-	void recalculatePositionAfterMoving(const std::size_t movedSamples)
-	{
-		writePosition_ = (writePosition_ - movedSamples + capacity_) % capacity_;
-		currentSize_ -= movedSamples;
-	}
-
-	///////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////
 	// Insert.
 	///////////////////////////////////////////////////////////////////////////////////////////////
 
 	/** Inserts a sample.
-		@param[in] sample ... Universal reference of an object of type Element.
+		\param sample ... Universal reference of an object of type Element.
 	*/
 	template <typename T>
 	void insertImpl(T&& sample)
@@ -169,10 +160,10 @@ class RingBuffer
 	}
 
 	/** Moves or copies number elements from source to buffer_.
-		@param[in] source ... Universal reference to an array of Element objects.
-		@param[in] sourceStart ... Start position of the move/copy operation in source.
-		@param[in] number ... The number of elements that is to be moved/copied from source to buffer_.
-		@param[in] destinationStart ... Start position of the move/copy operation in buffer_.
+		\param source ... Universal reference to an array of Element objects.
+		\param sourceStart ... Start position of the move/copy operation in source.
+		\param number ... The number of elements that is to be moved/copied from source to buffer_.
+		\param destinationStart ... Start position of the move/copy operation in buffer_.
 	*/
 	template <typename T>
 	void insertBlockElements(T&& source, const std::size_t sourceStart, const std::size_t destinationStart, const std::size_t number)
@@ -194,8 +185,8 @@ class RingBuffer
 	}
 
 	/** Inserts a block of length samples.
-		@param[in] block ... Universal reference to an array of Element objects.
-		@param[in] length ... The length of the array of Element objects.
+		\param block ... Universal reference to an array of Element objects.
+		\param length ... The length of the array of Element objects.
 	*/
 	template <typename T>
 	void insertBlockImpl(T&& block, std::size_t blockLength)
@@ -248,11 +239,11 @@ class RingBuffer
 	/** Copies the block of the samples first ... last.
 		SourceType ... The type of the source array.
 		DestinationType ... The type of the destination array.
-		@param[in] source ... Universal reference to the buffer array.
-		@param[in] destination ... Pointer to the destination array that is to be filled with source elements.
-		@param[in] first ... Index of the first element that is to be copied.
-		@param[in] last ... Index of the last element that is to be copied.
-		@param[in] std::true_type ... Is always std::true_type.
+		\param source ... Universal reference to the buffer array.
+		\param destination ... Pointer to the destination array that is to be filled with source elements.
+		\param first ... Index of the first element that is to be copied.
+		\param last ... Index of the last element that is to be copied.
+		\param std::true_type ... Is always std::true_type.
 	*/
 	template <typename SourceType, typename DestinationType>
 	void extractBlockElementsImpl(SourceType&& source, DestinationType* destination, std::size_t first, std::size_t last, std::true_type)
@@ -262,19 +253,19 @@ class RingBuffer
 			make_forward_iterator<SourceType>(&source.get()[last]),
 			0,
 			[&destination](std::size_t index, ElementStorageType&& element)
-		{
-			destination[index] = *reinterpret_cast<DestinationType*>(&element);
-		});
+		    {
+			    destination[index] = *reinterpret_cast<DestinationType*>(&element);
+		    });
 	}
 
 	/** Moves the block of the samples first ... last.
 		SourceType ... The type of the source array.
 		DestinationType ... The type of the destination array.
-		@param[in] source ... Universal reference to the buffer array.
-		@param[in] destination ... Pointer to the destination array that is to be filled with source elements.
-		@param[in] first ... Index of the first element that is to be moved.
-		@param[in] last ... Index of the last element that is to be moved.
-		@param[in] std::false_type ... Is always std::false_type.
+		\param source ... Universal reference to the buffer array.
+		\param destination ... Pointer to the destination array that is to be filled with source elements.
+		\param first ... Index of the first element that is to be moved.
+		\param last ... Index of the last element that is to be moved.
+		\param std::false_type ... Is always std::false_type.
 	*/
 	template <typename SourceType, typename DestinationType>
 	void extractBlockElementsImpl(SourceType&& source, DestinationType* destination, std::size_t first, std::size_t last, std::false_type)
@@ -284,18 +275,18 @@ class RingBuffer
 			make_forward_iterator<SourceType>(&source.get()[last]),
 			0,
 			[&destination](std::size_t index, ElementStorageType&& element)
-		{
-			destination[index] = std::forward<DestinationType>(*reinterpret_cast<DestinationType*>(&element));
-		});
-	}
+		    {
+			    destination[index] = std::forward<DestinationType>(*reinterpret_cast<DestinationType*>(&element));
+		    });
+	    }
 
 	/** Extracts the block of numberOfElements samples.
 		Uses SFINAE (based on the forwarded type of the source array) to get the right method for moving/copying.
 		SourceType ... The type of the source array.
 		DestinationType ... The type of the destination array.
-		@param[in] source ... Universal reference to the buffer array.
-		@param[in] destination ... Pointer to the destination array that is to be filled with source elements.
-		@param[in] numberOfElements ... The number of elements that are to be moved/copied from source to destinatin.
+		\param source ... Universal reference to the buffer array.
+		\param destination ... Pointer to the destination array that is to be filled with source elements.
+		\param numberOfElements ... The number of elements that are to be moved/copied from source to destinatin.
 	*/
 	template <typename SourceType, typename DestinationType>
 	std::size_t extractBlockElements(SourceType&& source, DestinationType* destination, std::size_t numberOfElements)
@@ -386,7 +377,7 @@ public:
 	/** Inserts a sample.
 	    Declaring and using T brings us an universal reference and we can profit from type deduction.
 	    So lvalue and rvalue references can be passed to this member (pefectly forwarded).
-		@param[in] sample ... Universal reference of an object of type Element.
+		\param sample ... Universal reference of an object of type Element.
 	*/
 	template <typename T>
 	void insert(T&& sample)
@@ -395,8 +386,8 @@ public:
 	}
 
 	/** Inserts a block of length samples.
-		@param[in] block ... Universal reference to an array of Element objects.
-		@param[in] length ... The length of the array of Element objects.
+		\param block ... Universal reference to an array of Element objects.
+		\param length ... The length of the array of Element objects.
 	*/
 	template <typename T>
 	void insert(T&& block, std::size_t blockLength)
@@ -409,7 +400,7 @@ public:
 		get(capacity_ - 1) Returns the oldest sample.
 		get(capacity_ * n) returns the last feeded sample.
 		get(capacity_ * n + 1) returns the sample feeded in prior to the last one.
-		@param[in] samplesBackward ... The reverse sample index.
+		\param samplesBackward ... The reverse sample index.
 		\return The sample feeded sampleBackward samples ago.
 	*/
 	Element copy(const std::size_t samplesBackward) const
@@ -422,41 +413,12 @@ public:
 
 	/** Copies the last numberOfElements samples from buffer_ into destination.
 		Attention: destination needs to have enough space for numberOfElements samples.
-		@param[in] destination ... Pointer to an array of Element.
-		@param[in] numberOfElements ... The number of elements that are to be copied into destination.
+		\param destination ... Pointer to an array of Element.
+		\param numberOfElements ... The number of elements that are to be copied into destination.
 	*/
-	void copyBlock(Element* destination, std::size_t numberOfElements)
+    void copy(Element* destination, std::size_t numberOfElements)
 	{
 		extractBlockElements(buffer_, destination, numberOfElements);
-	}
-
-	/** Moves the last sample that has been feeded in.
-		\return Element&& ... The rvalue of the last sample.
-	*/
-	Element&& moveLast(void)
-	{
-		assert(currentSize_ != 0);
-
-		std::size_t position = (writePosition_ - 1 + capacity_) % capacity_;
-
-		recalculatePositionAfterMoving(1);
-
-		return std::move(*reinterpret_cast<Element*>(&buffer_.get()[position]));
-	}
-
-	/** Moves the last numberOfElements samples from buffer_ into destination.
-		Attention: destination needs to have enough space for numberOfElements samples.
-		@param[in] destination ... Pointer to an array of Element.
-		@param[in] numberOfElements ... The number of elements that are to be moved into destination.
-		\return std::size_t ... The number of actually moved elements.
-	*/
-	std::size_t moveBlock(Element* destination, std::size_t numberOfElements)
-	{
-		numberOfElements = extractBlockElements(std::move(buffer_), destination, numberOfElements);
-		// Use the actual number of moved elements to recalculate the position.
-		recalculatePositionAfterMoving(numberOfElements);
-
-		return numberOfElements;
 	}
 
 	/** Returns the number of elements that the bufefr could contain without overwriting older ones.
