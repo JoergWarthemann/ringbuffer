@@ -63,7 +63,7 @@ Function enumerate(Iterator first, Iterator last, typename std::iterator_traits<
 }
 
 
-/** This defines a ring buffer. When reaching the buffer end while inserting a new element it will overwrite the oldest element.
+/** This defines a ring buffer. When reaching the buffer end while inserting new elements it will overwrite the oldest elements.
 	Uses aligned storage for performance gain.
 	Element ... The type of elements that are getting stored.
 */
@@ -73,6 +73,14 @@ class RingBuffer
 	// Create a type which optimally aligns Element for internal use.
     typedef typename std::aligned_storage<sizeof(Element), __alignof(Element)>::type ElementStorageType;
 
+    std::function<void(ElementStorageType*)> customizedStorageDeleter_ = [this](ElementStorageType* storageToGetDeleted)
+    {
+        // First of all we need to call each Elements dtor. Then we are allowed to delete the array.
+        for (std::size_t position = 0; position < std::min(currentSize_, capacity_); ++position)
+            reinterpret_cast<const Element*>(&storageToGetDeleted[position])->~Element();
+        delete[] storageToGetDeleted;
+    };
+
 	// ATTENTION: Use of unique_ptr is not possible with msvc12 since its deleter parameter is misleadingly copied instead of being moved.
 	//            So we cannot use a lambda or std::bind for the deleter of an array.
 	//            Moreover make_unique cannot be used since it does not take care of the deleter.
@@ -80,43 +88,11 @@ class RingBuffer
 	// http://stackoverflow.com/questions/23613104/non-copyable-deleter-in-stdunique-ptr
 	////std::unique_ptr<ElementStorageType[], std::function<void(ElementStorageType*)> > buffer_;
 	//std::unique_ptr<ElementStorageType, std::function<void(ElementStorageType*)> > buffer_;
+    std::unique_ptr<ElementStorageType, decltype(customizedStorageDeleter_)> buffer_;
 
-	std::shared_ptr<ElementStorageType> buffer_;
 	std::size_t capacity_;
 	std::size_t writePosition_;
 	std::size_t currentSize_;
-
-	/** Initializes the internal buffer and positions.
-		\param newCapacity ... The new capacity of the internal buffer.
-	*/
-	void initialize(std::size_t newCapacity)
-	{
-		capacity_ = newCapacity;
-
-		// Create the buffer with the specified capacity and a custom deleter.
-		buffer_.reset(new ElementStorageType[capacity_], [this](ElementStorageType* buffer)	// Cannot use std::make_shared with a custom deleter.
-		{
-			// First of all we need to call each Elements dtor. Then we are allowed to delete the array.
-			for (std::size_t position = 0; position < std::min(currentSize_, capacity_); ++position)
-				reinterpret_cast<const Element*>(&buffer[position])->~Element();
-			delete[] buffer;
-		});
-
-		writePosition_ = 0;
-		currentSize_ = 0;
-
-		////buffer_(new ElementStorageType[capacity], [this] (ElementStorageType* buf)
-		//buffer_(new ElementStorageType, [this](ElementStorageType* buf)
-		//{
-		//	// Test
-		//	//auto deleter = [this](int* ptr){ int i = 10; };
-		//	//std::unique_ptr<int[], decltype(deleter)> ptr4(new int[4], deleter);
-
-		//	for (std::size_t position = 0; position < currentSize_; ++position)
-		//		reinterpret_cast<const Element*>(&buf[position])->~Element();
-		//}),
-		//buffer_(new ElementStorageType[capacity_], std::bind(&RingBuffer<Element>::destroyBuffer, this)),
-	}
 
 	/** Destructs a range of elements.
 		\param from ... The index of the first element.
@@ -129,9 +105,9 @@ class RingBuffer
 			make_forward_iterator<ElementStorageType>(&buffer_.get()[to]),
 			0,
 			[](std::size_t index, ElementStorageType&& element)
-		{
-			reinterpret_cast<Element*>(&element)->~Element();
-		});
+		    {
+			    reinterpret_cast<Element*>(&element)->~Element();
+		    });
 	}
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -331,14 +307,20 @@ public:
 	RingBuffer& operator=(RingBuffer<Element>&&) = delete;
 
 	RingBuffer(void)
-	{
-		initialize(0);
-	}
+        // make_unique has no overload allowing to specify a custom deleter. Hence we need to live with the naked new.
+        : buffer_(new ElementStorageType[0], customizedStorageDeleter_),
+          capacity_(0),
+          writePosition_(0),
+          currentSize_(0)
+	{}
 
 	explicit RingBuffer(const std::size_t capacity)
-	{
-		initialize(capacity);
-	}
+        // make_unique has no overload allowing to specify a custom deleter. Hence we need to live with the naked new.
+        : buffer_(new ElementStorageType[capacity], customizedStorageDeleter_),
+          capacity_(capacity),
+          writePosition_(0),
+          currentSize_(0)
+	{}
 
 	~RingBuffer(void)
 	{
@@ -349,21 +331,21 @@ public:
 	*/
 	void reset(void)
 	{
-		if (currentSize_ > 0)
-		{
-			std::size_t oldestElement = (writePosition_ - currentSize_ + capacity_) % capacity_;
-            std::size_t supposedNewestElement = oldestElement + currentSize_;
-            std::size_t factualNewestElement = std::min(supposedNewestElement, static_cast<std::size_t>(capacity_));
+        if (currentSize_ == 0)
+            return;
 
-			destruct(oldestElement, factualNewestElement);
+		std::size_t oldestElement = (writePosition_ - currentSize_ + capacity_) % capacity_;
+        std::size_t supposedNewestElement = oldestElement + currentSize_;
+        std::size_t factualNewestElement = std::min(supposedNewestElement, static_cast<std::size_t>(capacity_));
 
-			factualNewestElement = supposedNewestElement - capacity_;
-			if (factualNewestElement > 0)
-				destruct(0, factualNewestElement);
+		destruct(oldestElement, factualNewestElement);
 
-			writePosition_ = 0;
-			currentSize_ = 0;
-		}
+		factualNewestElement = supposedNewestElement - capacity_;
+		if (factualNewestElement > 0)
+			destruct(0, factualNewestElement);
+
+		writePosition_ = 0;
+		currentSize_ = 0;
 	}
 
 	/** Destructs all buffer elements and reinitializes the buffer with a new capacity.
@@ -371,7 +353,9 @@ public:
 	void reset(std::size_t newCapacity)
 	{
 		reset();
-		initialize(newCapacity);
+        
+        capacity_ = newCapacity;
+        buffer_.reset(new ElementStorageType[newCapacity]);
 	}
 
 	/** Inserts a sample.
