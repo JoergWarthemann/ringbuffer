@@ -58,7 +58,7 @@ template <typename Iterator, typename Function>
 Function enumerate(Iterator first, Iterator last, typename std::iterator_traits<Iterator>::difference_type initial, Function func)
 {
 	for (; first != last; ++first, ++initial)
-		func(initial, std::forward<std::iterator_traits<Iterator>::value_type>(*first));
+		func(initial, std::forward<typename std::iterator_traits<Iterator>::value_type>(*first));
 	return func;
 }
 
