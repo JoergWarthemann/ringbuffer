@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <assert.h>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <type_traits>
@@ -71,7 +72,7 @@ template<typename Element>
 class RingBuffer
 {
 	// Create a type which optimally aligns Element for internal use.
-    typedef typename std::aligned_storage<sizeof(Element), __alignof(Element)>::type ElementStorageType;
+    typedef typename std::aligned_storage<sizeof(Element), alignof(Element)>::type ElementStorageType;
 
     std::function<void(ElementStorageType*)> customizedStorageDeleter_ = [this](ElementStorageType* storageToGetDeleted)
     {
@@ -81,18 +82,12 @@ class RingBuffer
         delete[] storageToGetDeleted;
     };
 
-	// ATTENTION: Use of unique_ptr is not possible with msvc12 since its deleter parameter is misleadingly copied instead of being moved.
-	//            So we cannot use a lambda or std::bind for the deleter of an array.
-	//            Moreover make_unique cannot be used since it does not take care of the deleter.
-	// http://www.ciiycode.com/7SSHSigQggXX/noncopyable-deleter-in-stduniqueptr
-	// http://stackoverflow.com/questions/23613104/non-copyable-deleter-in-stdunique-ptr
-	////std::unique_ptr<ElementStorageType[], std::function<void(ElementStorageType*)> > buffer_;
-	//std::unique_ptr<ElementStorageType, std::function<void(ElementStorageType*)> > buffer_;
     std::unique_ptr<ElementStorageType, decltype(customizedStorageDeleter_)> buffer_;
-
 	std::size_t capacity_;
 	std::size_t writePosition_;
 	std::size_t currentSize_;
+
+
 
 	/** Destructs a range of elements.
 		\param from ... The index of the first element.
