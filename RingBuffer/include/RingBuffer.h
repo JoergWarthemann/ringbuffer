@@ -76,18 +76,21 @@ class RingBuffer
 
     std::function<void(ElementStorageType*)> customizedStorageDeleter_ = [this](ElementStorageType* storageToGetDeleted)
     {
+        const std::size_t tmpCapacity = capacity_.load(std::memory_order_relaxed);
+        const std::size_t tmpCurrentSize = currentSize_.load(std::memory_order_relaxed);
+
         // First of all we need to call each Elements dtor. Then we are allowed to delete the array.
-        for (std::size_t position = 0; position < std::min(currentSize_, capacity_); ++position)
+        for (std::size_t position = 0; position < std::min(tmpCurrentSize, tmpCapacity); ++position)
             reinterpret_cast<const Element*>(&storageToGetDeleted[position])->~Element();
         delete[] storageToGetDeleted;
     };
 
+    // Use different cache lines in order to avoid false sharing.
+    alignas(64) std::atomic<std::size_t> readPosition_;
+    alignas(64) std::atomic<std::size_t> writePosition_;
+    alignas(64) std::atomic<std::size_t> currentSize_;
+    alignas(64) std::atomic<std::size_t> capacity_;
     std::unique_ptr<ElementStorageType, decltype(customizedStorageDeleter_)> buffer_;
-	std::size_t capacity_;
-	std::size_t writePosition_;
-	std::size_t currentSize_;
-
-
 
 	/** Destructs a range of elements.
 		\param from ... The index of the first element.
@@ -112,23 +115,33 @@ class RingBuffer
 	/** Inserts a sample.
 		\param sample ... Universal reference of an object of type Element.
 	*/
-	template <typename T>
-	void insertImpl(T&& sample)
-	{
-		if (currentSize_ == capacity_)
-			// Call the destructor of the element that gets overwritten.
-			reinterpret_cast<Element*>(&buffer_.get()[writePosition_])->~Element();
-		else
-			// Update the size of the stored array.
-			++currentSize_;
+    template <typename T>
+    void insertImpl(T&& sample)
+    {
+        const std::size_t tmpCapacity = capacity_.load(std::memory_order_relaxed);
+        std::size_t tmpCurrentSize = currentSize_.load(std::memory_order_relaxed);
+        std::size_t tmpWritePosition = writePosition_.load(std::memory_order_relaxed);
+        // This read-acquire synchronizes with a write-release in extract implementations.
+        const std::size_t tmpReadPosition = readPosition_.load(std::memory_order_acquire);
 
-		// Assign memory at buffer_[writePosition_] to a pointer of Element.
-		// Since we use placement new no memory needs to be allocated.
-		// Sample gets moved (when possible).
-		Element* element = new(&buffer_.get()[writePosition_]) Element(std::forward<T>(sample));
-		// Update the position.
-		writePosition_ = (writePosition_ + 1) % capacity_;
-	}
+        if (tmpCurrentSize == tmpCapacity)
+            // Call the destructor of the element that gets overwritten.
+            reinterpret_cast<Element*>(&buffer_.get()[tmpWritePosition])->~Element();
+        else
+            // Update the size of the stored array.
+            ++tmpCurrentSize;
+
+        // Assign memory at buffer_[writePosition_] to a pointer of Element.
+        // Since we use placement new no memory needs to be allocated.
+        // Sample gets moved (when possible).
+        Element* element = new(&buffer_.get()[tmpWritePosition]) Element(std::forward<T>(sample));
+        // Update the position.
+        tmpWritePosition = (tmpWritePosition + 1) % tmpCapacity;
+
+        // These write-release synchronize with read-acquire in extract implementations.
+        currentSize_.store(tmpCurrentSize, std::memory_order_release);
+        writePosition_.store(tmpWritePosition, std::memory_order_release);
+    }
 
 	/** Moves or copies number elements from source to buffer_.
 		\param source ... Universal reference to an array of Element objects.
@@ -136,24 +149,24 @@ class RingBuffer
 		\param number ... The number of elements that is to be moved/copied from source to buffer_.
 		\param destinationStart ... Start position of the move/copy operation in buffer_.
 	*/
-	template <typename T>
-	void insertBlockElements(T&& source, const std::size_t sourceStart, const std::size_t destinationStart, const std::size_t number)
-	{
-		if (currentSize_ == capacity_)
-			// Call the destructor of all elements that get overwritten.
-			destruct(destinationStart, destinationStart + number);
+    template <typename T>
+    void insertBlockElements(T&& source, const std::size_t sourceStart, const std::size_t destinationStart, const std::size_t number, const std::size_t capacity, std::size_t& currentSize)
+    {
+        if (currentSize == capacity)
+            // Call the destructor of all elements that get overwritten.
+            destruct(destinationStart, destinationStart + number);
 
-		std::uninitialized_copy(
-			make_forward_iterator<T>(&source[sourceStart]),
-			// Create an iterator for the last element. Since uninitialized_copy copies like [first, ..., last)
-			// we add 1 to point after the array.
-			make_forward_iterator<T>(&source[sourceStart + number - 1]) + 1,
-			reinterpret_cast<Element*>(&buffer_.get()[destinationStart]));
+        std::uninitialized_copy(
+            make_forward_iterator<T>(&source[sourceStart]),
+            // Create an iterator for the last element. Since uninitialized_copy copies like [first, ..., last)
+            // we add 1 to point after the array.
+            make_forward_iterator<T>(&source[sourceStart + number - 1]) + 1,
+            reinterpret_cast<Element*>(&buffer_.get()[destinationStart]));
 
-		// Update the size of the stored array.
-		if (currentSize_ < capacity_)
-			currentSize_ = std::min(capacity_, currentSize_ + number);
-	}
+        // Update the size of the stored array.
+        if (currentSize < capacity)
+            currentSize = std::min(capacity, currentSize + number);
+    }
 
 	/** Inserts a block of length samples.
 		\param block ... Universal reference to an array of Element objects.
@@ -162,29 +175,39 @@ class RingBuffer
 	template <typename T>
 	void insertBlockImpl(T&& block, std::size_t blockLength)
 	{
+        const std::size_t tmpCapacity = capacity_.load(std::memory_order_relaxed);
+        std::size_t tmpCurrentSize = currentSize_.load(std::memory_order_relaxed);
+        std::size_t tmpWritePosition = writePosition_.load(std::memory_order_relaxed);
+        // This read-acquire synchronizes with a write-release in extract implementations.
+        const std::size_t tmpReadPosition = readPosition_.load(std::memory_order_acquire);
+
 		std::size_t adjustedBlockLength = blockLength;
 		// Do we need to crop the block to fit into the buffer?
-		if (blockLength > capacity_)
-			adjustedBlockLength = capacity_;			// Limit the length to the buffer's length.
+		if (blockLength > tmpCapacity)
+			adjustedBlockLength = tmpCapacity;			// Limit the length to the buffer's length.
 
 		// Do we need to divide the block at the physical end of the buffer?
-		if ((writePosition_ + adjustedBlockLength) > capacity_)
+		if ((tmpWritePosition + adjustedBlockLength) > tmpCapacity)
 		{
 			// Forwards samples to the end of the buffer.
 			insertBlockElements(
 				std::forward<T>(block),
 				blockLength - adjustedBlockLength,
-				writePosition_,
-				capacity_ - writePosition_);
+                tmpWritePosition,
+                tmpCapacity - tmpWritePosition,
+                tmpCapacity,
+                tmpCurrentSize);
 			// Forwards samples to the begin of the buffer.
 			insertBlockElements(
 				std::forward<T>(block),
-				capacity_ - writePosition_,
+                tmpCapacity - tmpWritePosition,
 				0,
-				adjustedBlockLength - capacity_ + writePosition_);
+				adjustedBlockLength - tmpCapacity + tmpWritePosition,
+                tmpCapacity,
+                tmpCurrentSize);
 
 			// Update current position.
-			writePosition_ = adjustedBlockLength - capacity_ + writePosition_;
+            tmpWritePosition = adjustedBlockLength - tmpCapacity + tmpWritePosition;
 		}
 		else
 		{
@@ -192,15 +215,21 @@ class RingBuffer
 			insertBlockElements(
 				std::forward<T>(block),
 				blockLength - adjustedBlockLength,
-				writePosition_, adjustedBlockLength);
+                tmpWritePosition, adjustedBlockLength,
+                tmpCapacity,
+                tmpCurrentSize);
 
 			// Update current position.
-			writePosition_ = writePosition_ + adjustedBlockLength;
+            tmpWritePosition = tmpWritePosition + adjustedBlockLength;
 		}
 
 		// Reset the position of the first free element if buffer is full.
-		if (writePosition_ > capacity_ - 1)
-			writePosition_ = 0;
+		if (tmpWritePosition > tmpCapacity - 1)
+            tmpWritePosition = 0;
+
+        // These write-release synchronize with read-acquire in extract implementations.
+        currentSize_.store(tmpCurrentSize, std::memory_order_release);
+        writePosition_.store(tmpWritePosition, std::memory_order_release);
 	}
 
 	///////////////////////////////////////////////////////////////////////////////////////////////
@@ -264,14 +293,18 @@ class RingBuffer
 	{
 		assert(destination != nullptr);
 
+        // These read-acquire synchronize with a write-release in insert implementations.
+        const std::size_t tmpCurrentSize = currentSize_.load(std::memory_order_acquire);
+        const std::size_t tmpWritePosition = writePosition_.load(std::memory_order_acquire);
+
 		// We cannot give back more than we have.
-		if (numberOfElements > currentSize_)
-			numberOfElements = currentSize_;
+		if (numberOfElements > tmpCurrentSize)
+			numberOfElements = tmpCurrentSize;
 
 		if (numberOfElements > 0)
 		{
-			std::size_t start = (writePosition_ + (currentSize_ - numberOfElements)) % currentSize_;
-			std::size_t size = ((currentSize_ - start) < numberOfElements) ? (currentSize_ - start) : numberOfElements;
+			std::size_t start = (tmpWritePosition + (tmpCurrentSize - numberOfElements)) % tmpCurrentSize;
+			std::size_t size = ((tmpCurrentSize - start) < numberOfElements) ? (tmpCurrentSize - start) : numberOfElements;
 
 			extractBlockElementsImpl(
 				std::forward<SourceType>(source),
@@ -281,7 +314,7 @@ class RingBuffer
 				std::is_lvalue_reference<SourceType&&>{});
 
 			int numberOfRemaining = static_cast<int>(numberOfElements - size);
-			std::size_t startOfRemaining = (start + size) % currentSize_;
+			std::size_t startOfRemaining = (start + size) % tmpCurrentSize;
 
 			if (numberOfRemaining > 0)
 				extractBlockElementsImpl(
@@ -292,8 +325,33 @@ class RingBuffer
 					std::is_lvalue_reference<SourceType&&>{});
 		}
 
+        // This write-release synchronizes with a read-acquire in insert implementations.
+        readPosition_.store(tmpWritePosition, std::memory_order_release);
+
 		return numberOfElements;
 	}
+
+    /** Copies the sample feeded sampleBackwards samples ago.
+        \param samplesBackward ... The reverse sample index.
+        \return The sample feeded sampleBackward samples ago.
+    */
+    Element extractImpl(const std::size_t samplesBackward)
+    {
+        const std::size_t tmpCapacity = capacity_.load(std::memory_order_relaxed);
+        // These read-acquire synchronize with a write-release in insert implementations.
+        const std::size_t tmpCurrentSize = currentSize_.load(std::memory_order_acquire);
+        const std::size_t tmpWritePosition = writePosition_.load(std::memory_order_acquire);
+
+        if (tmpCurrentSize == 0)
+            return Element();
+
+        auto element = *reinterpret_cast<Element*>(&buffer_.get()[(tmpWritePosition - 1 - samplesBackward % tmpCapacity + tmpCapacity) % tmpCapacity]);
+
+        // This write-release synchronizes with a read-acquire in insert implementations.
+        readPosition_.store(tmpWritePosition, std::memory_order_release);
+
+        return element;
+    }
 
 public:
 	RingBuffer(const RingBuffer<Element>&) = delete;
@@ -305,6 +363,7 @@ public:
         // make_unique has no overload allowing to specify a custom deleter. Hence we need to live with the naked new.
         : buffer_(new ElementStorageType[0], customizedStorageDeleter_),
           capacity_(0),
+          readPosition_(0),
           writePosition_(0),
           currentSize_(0)
 	{}
@@ -312,9 +371,10 @@ public:
 	explicit RingBuffer(const std::size_t capacity)
         // make_unique has no overload allowing to specify a custom deleter. Hence we need to live with the naked new.
         : buffer_(new ElementStorageType[capacity], customizedStorageDeleter_),
-          capacity_(capacity),
-          writePosition_(0),
-          currentSize_(0)
+        capacity_(capacity),
+        readPosition_(0),
+        writePosition_(0),
+        currentSize_(0)
 	{}
 
 	~RingBuffer(void)
@@ -324,34 +384,39 @@ public:
 
 	/** Destructs all buffer elements and resets the buffer size.
 	*/
-	void reset(void)
-	{
-        if (currentSize_ == 0)
+    void reset(void)
+    {
+        const std::size_t tmpCapacity = capacity_.load(std::memory_order_relaxed);
+        const std::size_t tmpWritePosition = writePosition_.load(std::memory_order_relaxed);
+        const std::size_t tmpCurrentSize = currentSize_.load(std::memory_order_relaxed);
+
+        if (tmpCurrentSize == 0)
             return;
 
-		std::size_t oldestElement = (writePosition_ - currentSize_ + capacity_) % capacity_;
-        std::size_t supposedNewestElement = oldestElement + currentSize_;
-        std::size_t factualNewestElement = std::min(supposedNewestElement, static_cast<std::size_t>(capacity_));
+        std::size_t oldestElement = (tmpWritePosition - tmpCurrentSize + tmpCapacity) % tmpCapacity;
+        std::size_t supposedNewestElement = oldestElement + tmpCurrentSize;
+        std::size_t factualNewestElement = std::min(supposedNewestElement, static_cast<std::size_t>(tmpCapacity));
 
-		destruct(oldestElement, factualNewestElement);
+        destruct(oldestElement, factualNewestElement);
 
-		factualNewestElement = supposedNewestElement - capacity_;
-		if (factualNewestElement > 0)
-			destruct(0, factualNewestElement);
+        factualNewestElement = supposedNewestElement - tmpCapacity;
+        if (factualNewestElement > 0)
+            destruct(0, factualNewestElement);
 
-		writePosition_ = 0;
-		currentSize_ = 0;
-	}
+        writePosition_.store(0, std::memory_order_release);
+        readPosition_.store(0, std::memory_order_release);
+        currentSize_.store(0, std::memory_order_release);
+    }
 
 	/** Destructs all buffer elements and reinitializes the buffer with a new capacity.
 	*/
-	void reset(std::size_t newCapacity)
-	{
-		reset();
-        
-        capacity_ = newCapacity;
+    void reset(std::size_t newCapacity)
+    {
+        reset();
+
+        capacity_.store(newCapacity, std::memory_order_relaxed);
         buffer_.reset(new ElementStorageType[newCapacity]);
-	}
+    }
 
 	/** Inserts a sample.
 	    Declaring and using T brings us an universal reference and we can profit from type deduction.
@@ -382,12 +447,9 @@ public:
 		\param samplesBackward ... The reverse sample index.
 		\return The sample feeded sampleBackward samples ago.
 	*/
-	Element copy(const std::size_t samplesBackward) const
+	Element copy(const std::size_t samplesBackward)
 	{
-		if (currentSize_ == 0)
-			return Element();
-
-		return *reinterpret_cast<Element*>(&buffer_.get()[(writePosition_ - 1 - samplesBackward % capacity_ + capacity_) % capacity_]);
+        return extractImpl(samplesBackward);
 	}
 
 	/** Copies the last numberOfElements samples from buffer_ into destination.
@@ -400,21 +462,19 @@ public:
 		extractBlockElements(buffer_, destination, numberOfElements);
 	}
 
-	/** Returns the number of elements that the bufefr could contain without overwriting older ones.
-		\return The number of elements that the bufefr could contain without overwriting older ones.
+	/** \return The number of elements that the buffer could contain without overwriting older ones.
 	*/
-	std::size_t capacity(void) const
-	{
-		return capacity_;
-	}
+    std::size_t capacity(void) const
+    {
+        return capacity_.load(std::memory_order_relaxed);
+    }
 
-	/** Returns the number of elements in the buffer.
-		\return The number of elements in the buffer.
+	/** \return The number of elements in the buffer.
 	*/
-	std::size_t currentSize(void) const
-	{
-		return currentSize_;
-	}
+    std::size_t currentSize(void) const
+    {
+        return currentSize_.load(std::memory_order_relaxed);
+    }
 };
 
 }
