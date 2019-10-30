@@ -8,6 +8,7 @@ RingBuffer is a circular buffer container for data items. It implements the last
 * adding elements using copy or move semantics
 * fetching elements using copy semantics
 * adding new elements to a full circular buffer will overwrite the oldest elements
+* written for a single producer, single consumer environment (lock-free)
 
 ## Implementation
 
