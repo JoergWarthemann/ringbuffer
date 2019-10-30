@@ -452,15 +452,16 @@ public:
         return extractImpl(samplesBackward);
 	}
 
-	/** Copies the last numberOfElements samples from buffer_ into destination.
-		Attention: destination needs to have enough space for numberOfElements samples.
-		\param destination ... Pointer to an array of Element.
-		\param numberOfElements ... The number of elements that are to be copied into destination.
-	*/
-    void copy(Element* destination, std::size_t numberOfElements)
-	{
-		extractBlockElements(buffer_, destination, numberOfElements);
-	}
+    /** Copies the last numberOfElements samples from buffer_ into destination.
+        Attention: destination needs to have enough space for numberOfElements samples.
+        \param destination ... Pointer to an array of Element.
+        \param numberOfElements ... The number of elements that are to be copied into destination.
+        \return The number of samples being copied.
+    */
+    std::size_t copy(Element* destination, std::size_t numberOfElements)
+    {
+        return extractBlockElements(buffer_, destination, numberOfElements);
+    }
 
 	/** \return The number of elements that the buffer could contain without overwriting older ones.
 	*/
